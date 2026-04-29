@@ -64,3 +64,69 @@ library RB12Math {
 library RB12ECDSA {
     error RB12__BadSig();
     error RB12__BadSigLen();
+
+    // secp256k1n / 2
+    bytes32 internal constant _HALF_N =
+        0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
+
+    function recover(bytes32 digest, bytes memory sig) internal pure returns (address) {
+        if (sig.length != 65) revert RB12__BadSigLen();
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            r := mload(add(sig, 0x20))
+            s := mload(add(sig, 0x40))
+            v := byte(0, mload(add(sig, 0x60)))
+        }
+        if (uint256(s) > uint256(_HALF_N)) revert RB12__BadSig();
+        if (v != 27 && v != 28) revert RB12__BadSig();
+        address signer = ecrecover(digest, v, r, s);
+        if (signer == address(0)) revert RB12__BadSig();
+        return signer;
+    }
+
+    function toEthSignedMessageHash(bytes32 h) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", h));
+    }
+}
+
+abstract contract RB12ReentrancyGuard {
+    uint256 private _rb12Guard;
+    error RB12__Reentrancy();
+
+    modifier nonReentrant() {
+        if (_rb12Guard == 2) revert RB12__Reentrancy();
+        _rb12Guard = 2;
+        _;
+        _rb12Guard = 1;
+    }
+
+    constructor() {
+        _rb12Guard = 1;
+    }
+}
+
+abstract contract RB12Pausable {
+    event RB12Pause(bool paused, uint64 at);
+    error RB12__Paused();
+
+    bool public paused;
+
+    modifier whenNotPaused() {
+        if (paused) revert RB12__Paused();
+        _;
+    }
+
+    function _setPaused(bool v) internal {
+        paused = v;
+        emit RB12Pause(v, uint64(block.timestamp));
+    }
+}
+
+abstract contract RB12Ownable2Step {
+    event RB12OwnershipProposed(address indexed previousOwner, address indexed proposedOwner, uint64 at);
+    event RB12OwnershipTransferred(address indexed previousOwner, address indexed newOwner, uint64 at);
+    error RB12__OwnerOnly();
+    error RB12__PendingOwnerOnly();
