@@ -526,3 +526,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
     }
 
     function joinLobby(uint256 lobbyId) external payable whenNotPaused nonReentrant {
+        Lobby storage L = _lobbies[lobbyId];
+        if (L.status != LobbyStatus.OPEN) revert RB12__NotOpen();
+        if (L.maker == address(0) || L.taker != address(0)) revert RB12__BadState();
+        if (msg.sender == L.maker) revert RB12__BadInput();
+        if (msg.value != L.stakeWei) revert RB12__WrongValue();
+
+        L.taker = msg.sender;
+        L.joinedAt = uint32(block.timestamp);
+        L.status = LobbyStatus.READY;
+        emit RB12LobbyJoined(lobbyId, msg.sender, uint64(block.timestamp));
+
+        L.commitStart = uint32(block.timestamp);
+        L.status = LobbyStatus.COMMIT;
+    }
+
+    /// @notice Commit the hash of your move set: keccak(player, salt, turbo, drift, sabotage)
+    /// @dev Optionally allow a referee signature to deny/allow certain commits (anti-bot).
+    function commitMove(uint256 lobbyId, bytes32 commitHash, bytes calldata refereeSig)
+        external
+        whenNotPaused
+    {
+        Lobby storage L = _lobbies[lobbyId];
+        if (L.status != LobbyStatus.COMMIT) revert RB12__BadState();
+        if (commitHash == bytes32(0)) revert RB12__BadInput();
+
+        uint256 start = L.commitStart;
+        if (start == 0) revert RB12__BadState();
+        if (block.timestamp > start + commitWindow) revert RB12__TooLate();
+
+        if (msg.sender != L.maker && msg.sender != L.taker) revert RB12__NotPlayer();
+
+        // Optional referee signature: if provided, it must come from refereeSigner.
+        if (refereeSig.length != 0) {
+            bytes32 digest = RB12ECDSA.toEthSignedMessageHash(commitDigest(lobbyId, msg.sender, commitHash));
+            address signer = RB12ECDSA.recover(digest, refereeSig);
+            if (signer != refereeSigner) revert RB12__SigDenied();
+        }
+
+        if (msg.sender == L.maker) {
+            if (L.makerCommit != bytes32(0)) revert RB12__BadState();
+            L.makerCommit = commitHash;
+        } else {
+            if (L.takerCommit != bytes32(0)) revert RB12__BadState();
+            L.takerCommit = commitHash;
+        }
+
+        emit RB12Commit(lobbyId, msg.sender, commitHash, uint64(block.timestamp));
+
+        // Transition once both commits in.
+        if (L.makerCommit != bytes32(0) && L.takerCommit != bytes32(0)) {
+            L.revealStart = uint32(block.timestamp);
+            L.status = LobbyStatus.REVEAL;
+        }
+    }
+
+    function revealMove(uint256 lobbyId, bytes32 salt, uint8 turbo, uint8 drift, uint8 sabotage)
+        external
+        whenNotPaused
+    {
+        Lobby storage L = _lobbies[lobbyId];
+        if (L.status != LobbyStatus.REVEAL) revert RB12__BadState();
+        if (msg.sender != L.maker && msg.sender != L.taker) revert RB12__NotPlayer();
+        if (salt == bytes32(0)) revert RB12__BadInput();
+
+        uint256 start = L.revealStart;
+        if (start == 0) revert RB12__BadState();
