@@ -196,3 +196,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
         uint32 revealWindow,
         uint32 graceWindow,
         uint32 seasonId,
+        bytes32 rulesetHash,
+        uint64 at
+    );
+
+    event RB12Operator(address indexed operator, uint64 at);
+    event RB12Referee(address indexed refereeSigner, uint64 at);
+    event RB12FeeSink(address indexed feeRecipient, uint64 at);
+
+    event RB12LobbyOpened(
+        uint256 indexed lobbyId,
+        address indexed maker,
+        uint96 stakeWei,
+        uint16 laps,
+        uint16 trackId,
+        uint64 openedAt
+    );
+
+    event RB12LobbyJoined(uint256 indexed lobbyId, address indexed taker, uint64 joinedAt);
+
+    event RB12Commit(uint256 indexed lobbyId, address indexed player, bytes32 commitHash, uint64 at);
+    event RB12Reveal(
+        uint256 indexed lobbyId,
+        address indexed player,
+        bytes32 salt,
+        uint8 turbo,
+        uint8 drift,
+        uint8 sabotage,
+        uint64 at
+    );
+
+    event RB12Settled(
+        uint256 indexed lobbyId,
+        address indexed winner,
+        address indexed loser,
+        uint96 potWei,
+        uint96 feeWei,
+        uint32 seed,
+        uint16 winnerTime,
+        uint16 loserTime,
+        uint64 at
+    );
+
+    event RB12Cancelled(uint256 indexed lobbyId, address indexed by, uint96 refundWei, uint64 at);
+    event RB12SeasonRolled(uint32 indexed previousSeason, uint32 indexed newSeason, bytes32 marker, uint64 at);
+
+    event RB12Rating(address indexed player, int32 delta, uint32 newRating, uint32 seasonId, uint64 at);
+
+    // =============================================================
+    // Immutable uniqueness anchors (NOT authority; not auto-forwarded)
+    // =============================================================
+    address public immutable ADDRESS_A;
+    address public immutable ADDRESS_B;
+    address public immutable ADDRESS_C;
+
+    bytes32 public immutable GENESIS_SALT;
+    bytes32 public immutable ID_STAMP;
+
+    // =============================================================
+    // Roles / config
+    // =============================================================
+    address public operator;
+    address public refereeSigner;
+    address public feeRecipient;
+
+    uint16 public feeBps; // out of 10_000
+    uint32 public commitWindow; // seconds
