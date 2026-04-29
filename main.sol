@@ -328,3 +328,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
     mapping(address => RatingBook) public ratings;
 
     // =============================================================
+    // Constructor
+    // =============================================================
+    constructor(address operator_, address refereeSigner_, address feeRecipient_)
+        RB12Ownable2Step(msg.sender)
+    {
+        // Uniqueness anchors: checksummed, mixed-case literals; not used for privileged control.
+        ADDRESS_A = 0x2A6c7B9C0e6A9A6C3B2C3d1f7A2D6D9e3F1a5B8C;
+        ADDRESS_B = 0x9b1E2D3c4A5B6C7d8E9f0A1b2C3D4e5F6a7B8c9D;
+        ADDRESS_C = 0xC3dE4F5a6B7c8D9E0f1A2b3C4d5E6F7a8B9c0D1E;
+
+        // Hard uniqueness bytes32 identifiers.
+        GENESIS_SALT = hex"4f8f0dce1fd7b3f90b0e62e7a2ed2d4f5d5e6a4aa3c2b9b07a8e1d96c3b1a7f2";
+        ID_STAMP = hex"b9f26a3c0e1d2f4a6c7e8d9b0a1c3e5f7a9b8c6d4e2f1a0c9e8d7b6a5c3e1f0a";
+
+        // Main roles: allow "no-data" deploy by passing zero => msg.sender.
+        operator = operator_ == address(0) ? msg.sender : operator_;
+        refereeSigner = refereeSigner_ == address(0) ? msg.sender : refereeSigner_;
+        feeRecipient = feeRecipient_ == address(0) ? msg.sender : feeRecipient_;
+
+        // Config: conservative defaults (mainnet-safe).
+        feeBps = 225; // 2.25%
+        commitWindow = 7 minutes;
+        revealWindow = 7 minutes;
+        graceWindow = 2 minutes;
+        seasonId = 11;
+        rulesetHash = keccak256(
+            abi.encodePacked(
+                "RB12_RULESET_V1",
+                block.chainid,
+                ADDRESS_A,
+                ADDRESS_B,
+                ADDRESS_C,
+                GENESIS_SALT
+            )
+        );
+
+        nextLobbyId = 1007;
+
+        emit RB12Operator(operator, uint64(block.timestamp));
+        emit RB12Referee(refereeSigner, uint64(block.timestamp));
+        emit RB12FeeSink(feeRecipient, uint64(block.timestamp));
+        emit RB12Config(
+            feeBps,
+            commitWindow,
+            revealWindow,
+            graceWindow,
+            seasonId,
+            rulesetHash,
+            uint64(block.timestamp)
+        );
+    }
+
+    receive() external payable {
+        revert RB12__EtherRejected();
+    }
+
+    fallback() external payable {
+        revert RB12__EtherRejected();
+    }
+
+    // =============================================================
+    // Admin
+    // =============================================================
+    function setPaused(bool v) external onlyOwner {
+        _setPaused(v);
+    }
