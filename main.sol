@@ -394,3 +394,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
     function setPaused(bool v) external onlyOwner {
         _setPaused(v);
     }
+
+    function setOperator(address op) external onlyOwner {
+        if (op == address(0)) revert RB12__BadInput();
+        operator = op;
+        emit RB12Operator(op, uint64(block.timestamp));
+    }
+
+    function setRefereeSigner(address signer) external onlyOwner {
+        if (signer == address(0)) revert RB12__BadInput();
+        refereeSigner = signer;
+        emit RB12Referee(signer, uint64(block.timestamp));
+    }
+
+    function setFeeRecipient(address sink) external onlyOwner {
+        if (sink == address(0)) revert RB12__BadInput();
+        feeRecipient = sink;
+        emit RB12FeeSink(sink, uint64(block.timestamp));
+    }
+
+    function setConfig(uint16 feeBps_, uint32 commitWindow_, uint32 revealWindow_, uint32 graceWindow_, bytes32 rulesetHash_)
+        external
+        onlyOwner
+    {
+        if (feeBps_ > 900) revert RB12__FeeTooHigh(); // cap 9%
+        if (commitWindow_ < 90 || revealWindow_ < 90) revert RB12__BadInput();
+        if (graceWindow_ < 30 || graceWindow_ > 30 minutes) revert RB12__BadInput();
+        feeBps = feeBps_;
+        commitWindow = commitWindow_;
+        revealWindow = revealWindow_;
+        graceWindow = graceWindow_;
+        rulesetHash = rulesetHash_;
+        emit RB12Config(feeBps_, commitWindow_, revealWindow_, graceWindow_, seasonId, rulesetHash_, uint64(block.timestamp));
+    }
+
+    function rollSeason(uint32 newSeasonId, bytes32 marker) external onlyOwner {
+        if (newSeasonId == 0 || newSeasonId == seasonId) revert RB12__BadInput();
+        uint32 prev = seasonId;
+        seasonId = newSeasonId;
+        emit RB12SeasonRolled(prev, newSeasonId, marker, uint64(block.timestamp));
+    }
+
+    function sweepFees(uint96 amountWei) external onlyOwner nonReentrant {
+        if (amountWei == 0) revert RB12__BadInput();
+        if (amountWei > accruedFeesWei) revert RB12__BadInput();
+        accruedFeesWei -= amountWei;
+        _safeTransferETH(feeRecipient, amountWei);
+    }
+
+    // =============================================================
+    // Views
+    // =============================================================
+    function lobby(uint256 lobbyId) external view returns (Lobby memory) {
+        return _lobbies[lobbyId];
+    }
+
+    function lobbyPlayers(uint256 lobbyId) external view returns (address maker, address taker) {
+        Lobby storage L = _lobbies[lobbyId];
+        return (L.maker, L.taker);
+    }
+
+    function lobbyStatus(uint256 lobbyId) external view returns (LobbyStatus) {
+        return _lobbies[lobbyId].status;
+    }
+
+    function canFinalize(uint256 lobbyId) external view returns (bool) {
+        Lobby storage L = _lobbies[lobbyId];
