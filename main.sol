@@ -130,3 +130,69 @@ abstract contract RB12Ownable2Step {
     event RB12OwnershipTransferred(address indexed previousOwner, address indexed newOwner, uint64 at);
     error RB12__OwnerOnly();
     error RB12__PendingOwnerOnly();
+    error RB12__BadOwner();
+
+    address public owner;
+    address public pendingOwner;
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert RB12__OwnerOnly();
+        _;
+    }
+
+    constructor(address initialOwner) {
+        if (initialOwner == address(0)) revert RB12__BadOwner();
+        owner = initialOwner;
+        emit RB12OwnershipTransferred(address(0), initialOwner, uint64(block.timestamp));
+    }
+
+    function proposeOwner(address nextOwner) external onlyOwner {
+        if (nextOwner == address(0)) revert RB12__BadOwner();
+        pendingOwner = nextOwner;
+        emit RB12OwnershipProposed(owner, nextOwner, uint64(block.timestamp));
+    }
+
+    function acceptOwner() external {
+        if (msg.sender != pendingOwner) revert RB12__PendingOwnerOnly();
+        address prev = owner;
+        owner = pendingOwner;
+        pendingOwner = address(0);
+        emit RB12OwnershipTransferred(prev, owner, uint64(block.timestamp));
+    }
+}
+
+contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
+    using RB12SafeCast for uint256;
+    using RB12Math for uint256;
+
+    // =============================================================
+    // Errors (unique prefix)
+    // =============================================================
+    error RB12__BadInput();
+    error RB12__BadState();
+    error RB12__NotPlayer();
+    error RB12__AlreadyJoined();
+    error RB12__NotOpen();
+    error RB12__NotReady();
+    error RB12__WrongValue();
+    error RB12__TransferFailed();
+    error RB12__TooEarly();
+    error RB12__TooLate();
+    error RB12__CommitMismatch();
+    error RB12__RevealMismatch();
+    error RB12__NotSettled();
+    error RB12__AlreadySettled();
+    error RB12__Unauthorized();
+    error RB12__FeeTooHigh();
+    error RB12__EtherRejected();
+    error RB12__SigDenied();
+
+    // =============================================================
+    // Events (unique names)
+    // =============================================================
+    event RB12Config(
+        uint16 feeBps,
+        uint32 commitWindow,
+        uint32 revealWindow,
+        uint32 graceWindow,
+        uint32 seasonId,
