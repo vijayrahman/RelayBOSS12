@@ -460,3 +460,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
 
     function canFinalize(uint256 lobbyId) external view returns (bool) {
         Lobby storage L = _lobbies[lobbyId];
+        if (L.status != LobbyStatus.REVEAL) return false;
+        if (L.revealStart == 0) return false;
+        uint256 deadline = uint256(L.revealStart) + revealWindow + graceWindow;
+        return block.timestamp >= deadline;
+    }
+
+    function commitDigest(uint256 lobbyId, address player, bytes32 commitHash) public view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                "\x19RB12_COMMIT",
+                block.chainid,
+                address(this),
+                ID_STAMP,
+                lobbyId,
+                player,
+                commitHash
+            )
+        );
+    }
+
+    function revealCommitHash(address player, bytes32 salt, uint8 turbo, uint8 drift, uint8 sabotage) public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(player, salt, turbo, drift, sabotage));
+    }
+
+    // =============================================================
+    // Core flow: open -> join -> commit -> reveal -> settle
+    // =============================================================
+    function openLobby(uint96 stakeWei, uint16 laps, uint16 trackId)
+        external
+        payable
+        whenNotPaused
+        nonReentrant
+        returns (uint256 lobbyId)
+    {
+        if (stakeWei == 0) revert RB12__BadInput();
+        if (laps < 2 || laps > 24) revert RB12__BadInput();
+        if (trackId == 0 || trackId > 777) revert RB12__BadInput();
+        if (msg.value != stakeWei) revert RB12__WrongValue();
+
+        lobbyId = nextLobbyId++;
+        Lobby storage L = _lobbies[lobbyId];
+        if (L.status != LobbyStatus.NONE) revert RB12__BadState();
+
+        L.maker = msg.sender;
+        L.stakeWei = stakeWei;
+        L.laps = laps;
+        L.trackId = trackId;
+        L.openedAt = uint32(block.timestamp);
+        L.status = LobbyStatus.OPEN;
+
+        emit RB12LobbyOpened(lobbyId, msg.sender, stakeWei, laps, trackId, uint64(block.timestamp));
+    }
+
+    function cancelOpenLobby(uint256 lobbyId) external whenNotPaused nonReentrant {
+        Lobby storage L = _lobbies[lobbyId];
+        if (L.status != LobbyStatus.OPEN) revert RB12__NotOpen();
+        if (msg.sender != L.maker && msg.sender != operator && msg.sender != owner) revert RB12__Unauthorized();
+
+        L.status = LobbyStatus.CANCELLED;
+        uint96 refund = L.stakeWei;
+        L.stakeWei = 0;
+        _safeTransferETH(L.maker, refund);
+        emit RB12Cancelled(lobbyId, msg.sender, refund, uint64(block.timestamp));
+    }
+
+    function joinLobby(uint256 lobbyId) external payable whenNotPaused nonReentrant {
