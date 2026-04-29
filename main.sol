@@ -262,3 +262,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
 
     uint16 public feeBps; // out of 10_000
     uint32 public commitWindow; // seconds
+    uint32 public revealWindow; // seconds
+    uint32 public graceWindow; // seconds after revealWindow to allow finalize by anyone
+    uint32 public seasonId;
+    bytes32 public rulesetHash;
+
+    uint96 public accruedFeesWei;
+
+    // =============================================================
+    // Game storage
+    // =============================================================
+    enum LobbyStatus {
+        NONE,
+        OPEN,
+        READY,
+        COMMIT,
+        REVEAL,
+        SETTLED,
+        CANCELLED
+    }
+
+    struct Lobby {
+        address maker;
+        address taker;
+        uint96 stakeWei;
+        uint16 laps;
+        uint16 trackId;
+        uint32 openedAt;
+        uint32 joinedAt;
+        uint32 commitStart;
+        uint32 revealStart;
+        LobbyStatus status;
+        bytes32 makerCommit;
+        bytes32 takerCommit;
+        bool makerRevealed;
+        bool takerRevealed;
+        uint8 makerTurbo;
+        uint8 makerDrift;
+        uint8 makerSabotage;
+        uint8 takerTurbo;
+        uint8 takerDrift;
+        uint8 takerSabotage;
+        bytes32 makerSalt;
+        bytes32 takerSalt;
+        uint32 settleSeed;
+        uint16 makerTime;
+        uint16 takerTime;
+        address winner;
+        uint96 feeWei;
+        uint96 potWei;
+    }
+
+    uint256 public nextLobbyId;
+    mapping(uint256 => Lobby) private _lobbies;
+
+    // Season ratings (simple Elo-ish)
+    struct RatingBook {
+        uint32 season;
+        uint32 rating;
+        uint32 races;
+        uint32 wins;
+        uint32 losses;
+    }
+
+    mapping(address => RatingBook) public ratings;
+
+    // =============================================================
