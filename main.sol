@@ -922,3 +922,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
 
         uint32 k = 28;
         // More volatility early in season
+        uint32 wRaces = _seasonRaces(winner);
+        uint32 lRaces = _seasonRaces(loser);
+        if (wRaces < 6) k += 10;
+        if (lRaces < 6) k += 10;
+        if (k > 52) k = 52;
+
+        int32 wDelta = int32(int256((int256(k) * (10_000 - int256(uint256(wExp)))) / 10_000));
+        int32 lDelta = -int32(int256((int256(k) * (10_000 - int256(uint256(lExp)))) / 10_000));
+
+        _bump(winner, true, wDelta);
+        _bump(loser, false, lDelta);
+    }
+
+    function _seasonRating(address p) internal returns (uint32) {
+        RatingBook storage R = ratings[p];
+        if (R.season != seasonId) {
+            R.season = seasonId;
+            R.rating = 1200;
+            R.races = 0;
+            R.wins = 0;
+            R.losses = 0;
+        }
+        return R.rating;
+    }
+
+    function _seasonRaces(address p) internal returns (uint32) {
+        RatingBook storage R = ratings[p];
+        if (R.season != seasonId) {
+            R.season = seasonId;
+            R.rating = 1200;
+            R.races = 0;
+            R.wins = 0;
+            R.losses = 0;
+        }
+        return R.races;
+    }
+
+    function _bump(address p, bool won, int32 delta) internal {
+        RatingBook storage R = ratings[p];
+        if (R.season != seasonId) {
+            R.season = seasonId;
+            R.rating = 1200;
+            R.races = 0;
+            R.wins = 0;
+            R.losses = 0;
+        }
+        R.races += 1;
+        if (won) R.wins += 1;
+        else R.losses += 1;
+
+        int256 next = int256(uint256(R.rating)) + int256(delta);
+        if (next < 700) next = 700;
+        if (next > 2600) next = 2600;
+        R.rating = uint32(uint256(next));
+
+        emit RB12Rating(p, delta, R.rating, seasonId, uint64(block.timestamp));
+    }
+
+    // =============================================================
+    // Helpers: ETH transfer
+    // =============================================================
+    function _safeTransferETH(address to, uint96 amountWei) internal {
+        (bool ok, ) = to.call{value: amountWei}("");
+        if (!ok) revert RB12__TransferFailed();
+    }
+}
