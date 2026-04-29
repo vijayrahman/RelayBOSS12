@@ -592,3 +592,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
 
         uint256 start = L.revealStart;
         if (start == 0) revert RB12__BadState();
+        if (block.timestamp > start + revealWindow) revert RB12__TooLate();
+
+        // Small bounds: keep gameplay sane.
+        if (turbo > 10) revert RB12__BadInput();
+        if (drift > 10) revert RB12__BadInput();
+        if (sabotage > 6) revert RB12__BadInput();
+
+        bytes32 expected = revealCommitHash(msg.sender, salt, turbo, drift, sabotage);
+
+        if (msg.sender == L.maker) {
+            if (L.makerRevealed) revert RB12__BadState();
+            if (L.makerCommit == bytes32(0)) revert RB12__BadState();
+            if (expected != L.makerCommit) revert RB12__RevealMismatch();
+            L.makerRevealed = true;
+            L.makerSalt = salt;
+            L.makerTurbo = turbo;
+            L.makerDrift = drift;
+            L.makerSabotage = sabotage;
+        } else {
+            if (L.takerRevealed) revert RB12__BadState();
+            if (L.takerCommit == bytes32(0)) revert RB12__BadState();
+            if (expected != L.takerCommit) revert RB12__RevealMismatch();
+            L.takerRevealed = true;
+            L.takerSalt = salt;
+            L.takerTurbo = turbo;
+            L.takerDrift = drift;
+            L.takerSabotage = sabotage;
+        }
+
+        emit RB12Reveal(lobbyId, msg.sender, salt, turbo, drift, sabotage, uint64(block.timestamp));
+    }
+
+    /// @notice Settle when both revealed, or after windows expire.
+    function settle(uint256 lobbyId) external whenNotPaused nonReentrant {
+        Lobby storage L = _lobbies[lobbyId];
+        if (L.status == LobbyStatus.SETTLED) revert RB12__AlreadySettled();
+        if (L.status != LobbyStatus.REVEAL && L.status != LobbyStatus.COMMIT) revert RB12__BadState();
+
+        // If still in COMMIT and window expired, cancel and refund both (or maker if no taker).
+        if (L.status == LobbyStatus.COMMIT) {
+            if (block.timestamp <= uint256(L.commitStart) + commitWindow) revert RB12__TooEarly();
+            _expireCommitPhase(lobbyId, L);
+            return;
+        }
+
+        uint256 start = L.revealStart;
+        if (start == 0) revert RB12__BadState();
+
+        bool bothRevealed = L.makerRevealed && L.takerRevealed;
+        bool revealExpired = block.timestamp > start + revealWindow;
+
+        if (!bothRevealed && !revealExpired) revert RB12__TooEarly();
+
+        _settleInternal(lobbyId, L);
+    }
+
+    // =============================================================
+    // Internal settlement logic
+    // =============================================================
+    function _expireCommitPhase(uint256 lobbyId, Lobby storage L) internal {
+        // If taker exists but commits missing, refund both stakes to original senders.
+        // If taker not joined, refund maker.
+        L.status = LobbyStatus.CANCELLED;
+
+        uint96 stake = L.stakeWei;
+        L.stakeWei = 0;
