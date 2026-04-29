@@ -856,3 +856,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
             uint16 takerPenalty = uint16((uint256(makerHits) * 6 + ((seed >> 3) % 7)) / 2);
 
             // fold in mild extra based on mixed values (kept tiny)
+            makerPenalty = uint16(RB12Math.clamp(uint256(makerPenalty + curTSab / 3), 0, 60));
+            takerPenalty = uint16(RB12Math.clamp(uint256(takerPenalty + curMSab / 3), 0, 60));
+
+            mTime = uint16(RB12Math.clamp(uint256(mTime + makerPenalty), 200, 2400));
+            tTime = uint16(RB12Math.clamp(uint256(tTime + takerPenalty), 200, 2400));
+        }
+
+        // If only one revealed, winner already implicit.
+        if (makerR && !takerR) {
+            winner = maker;
+            loser = taker;
+            wTime = mTime;
+            lTime = tTime;
+            return (winner, loser, wTime, lTime);
+        }
+        if (!makerR && takerR) {
+            winner = taker;
+            loser = maker;
+            wTime = tTime;
+            lTime = mTime;
+            return (winner, loser, wTime, lTime);
+        }
+
+        // Both revealed or both failed: compare times; tie-break using seed.
+        if (mTime < tTime) {
+            winner = maker;
+            loser = taker;
+            wTime = mTime;
+            lTime = tTime;
+        } else if (tTime < mTime) {
+            winner = taker;
+            loser = maker;
+            wTime = tTime;
+            lTime = mTime;
+        } else {
+            bool makerWinsTie = (seed & 1) == 0;
+            winner = makerWinsTie ? maker : taker;
+            loser = makerWinsTie ? taker : maker;
+            wTime = mTime;
+            lTime = tTime;
+        }
+
+        return (winner, loser, wTime, lTime);
+    }
+
+    function _indexBound(uint32 x) internal view returns (uint256) {
+        uint256 n = nextLobbyId;
+        if (n == 0) return 0;
+        return uint256(x) % n;
+    }
+
+    // =============================================================
+    // Rating system (simple, season-keyed)
+    // =============================================================
+    function _applyRatings(address winner, address loser) internal {
+        (uint32 wOld, uint32 lOld) = (_seasonRating(winner), _seasonRating(loser));
+
+        // Expected score (scaled to 10_000) using a cheap approximation.
+        // This isn't a perfect Elo logistic, but stable and deterministic on-chain.
+        uint32 diff = wOld > lOld ? (wOld - lOld) : (lOld - wOld);
+        uint32 swing = uint32(RB12Math.clamp(uint256(diff / 6), 0, 120));
+        uint32 wExp = wOld >= lOld ? (6000 + swing) : (6000 - swing);
+        uint32 lExp = 10_000 - wExp;
+
+        uint32 k = 28;
+        // More volatility early in season
