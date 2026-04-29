@@ -658,3 +658,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
 
         uint96 stake = L.stakeWei;
         L.stakeWei = 0;
+
+        if (L.taker == address(0)) {
+            _safeTransferETH(L.maker, stake);
+            emit RB12Cancelled(lobbyId, msg.sender, stake, uint64(block.timestamp));
+            return;
+        }
+
+        _safeTransferETH(L.maker, stake);
+        _safeTransferETH(L.taker, stake);
+        emit RB12Cancelled(lobbyId, msg.sender, stake, uint64(block.timestamp));
+    }
+
+    function _settleInternal(uint256 lobbyId, Lobby storage L) internal {
+        if (L.status != LobbyStatus.REVEAL) revert RB12__BadState();
+
+        address maker = L.maker;
+        address taker = L.taker;
+        if (maker == address(0) || taker == address(0)) revert RB12__BadState();
+
+        // If only one revealed, the revealer wins by default (anti-stall).
+        bool makerR = L.makerRevealed;
+        bool takerR = L.takerRevealed;
+
+        // Seed uses both salts if available; otherwise uses only revealer salt plus contract ids.
+        bytes32 seedMat = keccak256(
+            abi.encodePacked(
+                "RB12_SEED",
+                GENESIS_SALT,
+                ID_STAMP,
+                blockhash(block.number - 1),
+                lobbyId,
+                maker,
+                taker,
+                makerR ? L.makerSalt : bytes32(0),
+                takerR ? L.takerSalt : bytes32(0),
+                L.trackId,
+                L.laps
+            )
+        );
+        uint32 seed = uint256(seedMat).toUint32();
+        L.settleSeed = seed;
+
+        uint96 stake = L.stakeWei;
+        uint96 pot = stake * 2;
+        L.potWei = pot;
+
+        uint96 fee = uint96((uint256(pot) * feeBps) / 10_000);
+        L.feeWei = fee;
+        accruedFeesWei += fee;
+
+        uint96 payout = pot - fee;
+
+        // Compute times; lower time wins.
+        (uint16 makerTime, uint16 takerTime) = _raceTimes(seed, L, makerR, takerR);
+        L.makerTime = makerTime;
+        L.takerTime = takerTime;
+
+        (address winner, address loser, uint16 wTime, uint16 lTime) = _pickWinner(maker, taker, makerR, takerR, makerTime, takerTime, seed);
+
+        L.winner = winner;
+        L.status = LobbyStatus.SETTLED;
+
+        _safeTransferETH(winner, payout);
+
+        _applyRatings(winner, loser);
+
