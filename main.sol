@@ -724,3 +724,69 @@ contract RelayBOSS12 is RB12ReentrancyGuard, RB12Pausable, RB12Ownable2Step {
 
         _applyRatings(winner, loser);
 
+        emit RB12Settled(
+            lobbyId,
+            winner,
+            loser,
+            pot,
+            fee,
+            seed,
+            wTime,
+            lTime,
+            uint64(block.timestamp)
+        );
+    }
+
+    function _raceTimes(uint32 seed, Lobby storage L, bool makerR, bool takerR)
+        internal
+        view
+        returns (uint16 makerTime, uint16 takerTime)
+    {
+        // Baseline time: depends on laps and track friction.
+        uint256 base = 420 + uint256(L.laps) * 68 + (uint256(L.trackId) % 17) * 9;
+
+        // Track swing from seed
+        uint256 wobbleA = (uint256(seed) % 29) * 3; // 0..84
+        uint256 wobbleB = (uint256(seed >> 5) % 31) * 2; // 0..60
+
+        uint256 makerAdj = 0;
+        uint256 takerAdj = 0;
+
+        if (makerR) {
+            makerAdj = _moveAdjustment(L.makerTurbo, L.makerDrift, L.makerSabotage, seed, true);
+        } else {
+            // non-revealer penalty: slower by a fixed but seed-flavored amount
+            makerAdj = 120 + (uint256(seed >> 11) % 41);
+        }
+
+        if (takerR) {
+            takerAdj = _moveAdjustment(L.takerTurbo, L.takerDrift, L.takerSabotage, seed, false);
+        } else {
+            takerAdj = 120 + (uint256(seed >> 17) % 41);
+        }
+
+        uint256 makerRaw = base + wobbleA + makerAdj;
+        uint256 takerRaw = base + wobbleB + takerAdj;
+
+        // Clamp into uint16 and reasonable bounds
+        makerRaw = makerRaw.clamp(200, 2200);
+        takerRaw = takerRaw.clamp(200, 2200);
+
+        makerTime = uint16(makerRaw);
+        takerTime = uint16(takerRaw);
+    }
+
+    function _moveAdjustment(uint8 turbo, uint8 drift, uint8 sabotage, uint32 seed, bool isMaker)
+        internal
+        pure
+        returns (uint256 adj)
+    {
+        // Turbo reduces time but increases risk on high track volatility.
+        // Drift reduces volatility penalty but costs a bit if overused.
+        // Sabotage increases opponent time indirectly (modeled later in winner selection).
+        uint256 s = uint256(seed);
+        uint256 volatility = ((s >> (isMaker ? 2 : 3)) % 21); // 0..20
+
+        uint256 turboGain = uint256(turbo) * 11; // up to 110
+        uint256 driftGuard = uint256(drift) * 7; // up to 70
+        uint256 driftCost = uint256(drift) * 3; // up to 30
